@@ -155,13 +155,13 @@ The configuration is made in `conf/application.conf`.
 Values:
 
 - Play configuration:
-  - application.secret = <secret> => Use a proper secret if used in production. See previous sections.
-  - http.port=<http port>
-  - http.address=<address to http>
-  - https.port=<https port>
-  - https.address=<address to https>
-  - https.keyStore=<path to keystone if use it>
-  - https.keyStorePassword=<password of keyStore if use it and have>
+  - application.secret = `secret` => Use a proper secret if used in production. See previous sections.
+  - http.port=`http port`
+  - http.address=`address to http`
+  - https.port=`https port`
+  - https.address=`address to https`
+  - https.keyStore=`path to keystone if use it`
+  - https.keyStorePassword=`password of keyStore if use it and have`
 - Custom app configuration:
-  - kurento.ws = <websocket-url> => Kurento Media Server path
-  - kurento.test.ws = <local-websocket-url> => Kurento Media Server Mock path
+  - kurento.ws = `websocket-url` => Kurento Media Server path
+  - kurento.test.ws = `local-websocket-url` => Kurento Media Server Mock path
