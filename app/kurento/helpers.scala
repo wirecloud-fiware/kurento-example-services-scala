@@ -60,6 +60,7 @@ object actors {
   case class Connect(from: MediaElement, to: MediaElement) extends KurentoActorAction
   case class ListenerEndOfStream(player: PlayerEndpoint, listener: EventListener[EndOfStreamEvent]) extends KurentoActorAction
   case class Play(player: PlayerEndpoint) extends KurentoActorAction
+  case class Stop(player: PlayerEndpoint) extends KurentoActorAction
   case class SetMaxVideoRecvB(webrtc: WebRtcEndpoint, v: Int) extends KurentoActorAction
   case class SetMaxVideoSendB(webrtc: WebRtcEndpoint, v: Int) extends KurentoActorAction
   case class SetMinVideoSendB(webrtc: WebRtcEndpoint, v: Int) extends KurentoActorAction
@@ -101,6 +102,7 @@ object actors {
       case ProcessOffer(webrtc, sdp) => Some(Try(webrtc.processOffer(sdp)))
       case ListenerEndOfStream(p, l) => p.addEndOfStreamListener(l); None
       case Play(p) => p.play(); None
+      case Stop(p) => p.stop(); None
       case SetMaxVideoRecvB(w, v) => w.setMaxVideoRecvBandwidth(v); None
       case SetMaxVideoSendB(w, v) => w.setMaxVideoSendBandwidth(v); None
       case SetMinVideoSendB(w, v) => w.setMinVideoSendBandwidth(v); None

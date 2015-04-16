@@ -25,6 +25,7 @@ import scala.util.{Failure, Success, Try}
 class CrowdDetectorActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
 
   var mut_pipe: Option[MediaPipeline] = None
+  var mut_player: Option[PlayerEndpoint] = None
 
   val kurentoActor = Akka.system.actorOf(KurentoActor.props(kurento.client), name = s"kurentoactor-crowd-${out.hashCode()}")
 
@@ -33,6 +34,7 @@ class CrowdDetectorActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
   def sendSender(js: Option[JsObject]) = js foreach { out ! safeToJsonOut(_) }
 
   def release(): Unit = {
+    mut_player foreach { kurentoActor ! Stop(_) }
     mut_pipe foreach { kurentoActor ! Release(_) }
     mut_pipe = None
   }
@@ -120,6 +122,7 @@ class CrowdDetectorActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
     mut_pipe = Some(pipeline)
     val webrtc = await { ask(kurentoActor, CreateWebRtcEndp(pipeline)).mapTo[Try[WebRtcEndpoint]] }.get
     val player = await { ask(kurentoActor, CreatePlayerEndpoint(pipeline, url)).mapTo[Try[PlayerEndpoint]] }.get
+    mut_player = Some(player)
 
     val actions = collection.mutable.ListBuffer[KurentoActorAction]()
     actions ++= List(
