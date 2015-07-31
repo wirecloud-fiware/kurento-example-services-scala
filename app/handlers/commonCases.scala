@@ -50,6 +50,7 @@ object commonCases {
     roisconf
   }
 
+
   // case class AddPipeline(pipeline: AsyncCallMediaPipeline)
   // case object RemovePipeline
   case class UserSession(
@@ -117,7 +118,66 @@ object commonCases {
     def get = (pipelines.get _)  // Cool way to write it :-)
   }
 
+  def parseNameDomain(name: String): Option[(String, String)] = {
+    val NameDomain = "^([\\w-]+)(?:@([\\w-]+))?$".r
+    name match {
+      case NameDomain(name, null) => Some(name, "")
+      case NameDomain(name, domain) => Some(name, domain)
+      case _ => None
+    }
+  }
+
+
+  // object newUserRegistry {
   object userRegistry {
+    val ids = new TrieMap[String, (String, String)]()
+    val users = new TrieMap[String, TrieMap[String, UserSession]]()
+    val names = new TrieMap[String, TrieMap[String, UserSession]]()
+
+    def addDoubleTrie(where: TrieMap[String, TrieMap[String, UserSession]], id1: String, id2: String, user: UserSession) =
+      where.put(id1, where.getOrElse(id1, new TrieMap[String, UserSession]()) += (id2 -> user))
+
+
+    def register(user: UserSession) = {
+      parseNameDomain(user.name) match {
+        case Some((name, domain)) => {
+          addDoubleTrie(users, name, domain, user)
+          ids += (user.id -> (name, domain))
+        }
+        case None =>
+      }
+    }
+
+    def unregister(id: String) = {
+      ids.get(id) match {
+        case Some((name, dom)) => {
+          ids -= id
+          users.get(name).foreach { trie => trie -= dom; if (trie.size == 0) users -= name }
+
+          if (dom != "")  name + "@" + dom else name
+        }
+        case None => "There was no name"
+      }
+    }
+
+    def getById(id: String): Option[UserSession] = getByNameDomain(ids.get(id))
+
+    def getByNameDomain(namedom: Option[(String, String)]): Option[UserSession] = namedom match {
+        case Some((name, domain)) => users.get(name).flatMap { _.get(domain) }
+        case None => None
+    }
+    def getByName(name: String) = getByNameDomain(parseNameDomain(name))
+    def getAllExceptID(id: String): Option[Iterable[UserSession]] = ids.get(id) flatMap { case(name, domain) =>
+      users.get(name) map { domains => domains.values } map { _.filterNot { u => u.id == id }}
+      case _ => None
+    }
+    def getAllLocationsByName(name: String): Option[Iterable[UserSession]] = parseNameDomain(name) match {
+      case Some((name, _)) => users.get(name).map {domains => domains.values}
+      case None => None
+    }
+  }
+
+  object newUseRegistry {
     //    var ids = new ConcurrentHashMap[String, UserSession] asScala
     //    var names = new ConcurrentHashMap[String, UserSession] asScala
 

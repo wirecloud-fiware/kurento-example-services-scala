@@ -52,7 +52,13 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
       }
       case None => None
     }
-    Some(Json.obj("id" -> "stopCommunication", "message" -> msg2))
+    if (msg != "" && msg2 == "")
+      uuid foreach {
+        userRegistry.getAllExceptID(_) foreach { _.foreach { u =>
+          sendTo(u.ws, Some(Json.obj("id" -> "callResponse", "response" -> "rejected", "message" -> "rejected in other domain")))
+        }}
+      }
+    // Some(Json.obj("id" -> "stopCommunication", "message" -> msg2))
   }
 
   def incomingCallResponse(id: String, from: String, calleeSdp: String) = {
@@ -64,23 +70,26 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
         }
         None
       }
-      case (None, _) => rejectCall(from, "", "You have to register before")
-      case (_, None) => rejectCall(from, "", s"unknown from = ${from}")
+      case (None, _) => Some(Json.obj("id" -> "stopCommunication", "message" -> "You have to register before")) // rejectCall(from, "", "You have to register before")
+      case (_, None) => Some(Json.obj("id" -> "stopCommunication", "message" -> s"unknown from = ${from}")) // rejectCall(from, "", s"unknown from = ${from}")
     }
   }
 
+
   def call(id: String, to: String, from: String, sdpOffer: String) = {
     def createError(msg: String) = Some(Json.obj("id" -> "callResponse", "response" -> "rejected", "message" -> msg))
-    (userRegistry.getById(id), userRegistry.getByName(to)) match {
-      case (Some(caller), Some(callee)) => {
+      (userRegistry.getById(id), userRegistry.getAllLocationsByName(to)) match {
+      case (Some(caller), Some(calleeList)) => {
         if (caller.name != from) createError(s"The name you said ${from} not match with yours.")
         else {
-          val ncallee = callee.copy(peer = Some(from))
           val ncaller = caller.copy(sdpOffer = Some(sdpOffer), peer = Some(to))
-          userRegistry.register(ncallee)
           userRegistry.register(ncaller)
-          sendTo(callee.ws, Some(Json.obj("id" -> "incomingCall", "from" -> from)))
-          None // Do not send back to the user an answer :)
+          calleeList.foreach { callee =>
+            val ncallee = callee.copy(peer = Some(from))
+            userRegistry.register(ncallee)
+            sendTo(ncallee.ws, Some(Json.obj("id" -> "incomingCall", "from" -> from)))
+          }
+          None
         }
       }
       case (Some(_), None) => createError(s"user ${to} is not registered")
@@ -88,8 +97,36 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
     }
   }
 
+  // def newCall(id: String, to: String, from: String, sdpOffer: String) = {
+  //   def createError(msg: String) = Some(Json.obj("id" -> "callResponse", "response" -> "rejected", "message" -> msg))
+  //   (userRegistry.getById(id), userRegistry.getByName(to)) match {
+  //     case (Some(caller), Some(callee)) => {
+  //       if (caller.name != from) createError(s"The name you said ${from} not match with yours.")
+  //       else {
+  //         val ncallee = callee.copy(peer = Some(from))
+  //         val ncaller = caller.copy(sdpOffer = Some(sdpOffer), peer = Some(to))
+  //         userRegistry.register(ncallee)
+  //         userRegistry.register(ncaller)
+  //         sendTo(callee.ws, Some(Json.obj("id" -> "incomingCall", "from" -> from)))
+  //         None // Do not send back to the user an answer :)
+  //       }
+  //     }
+  //     case (Some(_), None) => createError(s"user ${to} is not registered")
+  //     case (None, _) => createError("You have to register before")
+  //   }
+  // }
+
+  // def registerDomain(id: String, name: String) = newUserRegistry.getByNameDomain(parseNameDomain(name)) match {
+  //   case Some(_) => Json.obj("id" -> "registerResponse", "response" -> "rejected", "message" -> s"User ${name} already registered")
+  //   case None => {
+  //     newUserRegistry.register(UserSession(id, name, out, None, None, this.self))
+  //     uuid = Some(id)
+  //     Json.obj("id" -> "registerResponse", "response" -> "accepted")
+  //   }
+  // }
+
   def register(id: String, name: String) = userRegistry.getByName(name) match {
-    case Some(v) => Json.obj("id" -> "registerResponse", "response" -> "rejected", "message" -> s"User ${name} already registered")
+    case Some(_) => Json.obj("id" -> "registerResponse", "response" -> "rejected", "message" -> s"User ${name} already registered")
     case None => {
       userRegistry.register(UserSession(id, name, out, None, None, this.self))
       uuid = Some(id)
@@ -120,14 +157,38 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
     full_release()
 
     val stopper = uuid flatMap { userRegistry.getById(_) }
-    val stopped = stopper flatMap { _.peer flatMap { userRegistry.getByName(_) } }
+
+    val stoppedList = stopper flatMap { _.peer flatMap { userRegistry.getAllLocationsByName(_) } }
+
     stopper foreach { u => userRegistry.register(u.copy(peer = None)) }
-    stopped foreach { u =>
-      pipes.delete(u.id)
-      sendTo(u.ws, Some(Json.obj("id" -> "stopCommunication")))
+
+    val otherids = (uuid flatMap { userRegistry.getAllExceptID(_) }) getOrElse(Iterable[UserSession]())
+
+    otherids foreach { u => sendTo(u.ws, Some(Json.obj("id" -> "info", "message" -> s"You have been unregistered in ${stopper.getOrElse(UserSession("", "noname", null, None, None, null)).name}")))
     }
+
+    if( otherids.size <= 0 ) {
+      stoppedList foreach { _.foreach { u =>
+        pipes.delete(u.id)
+        sendTo(u.ws, Some(Json.obj("id" -> "stopCommunication")))
+      }}
+    }
+
     None
   }
+
+  // def newStop() = {
+  //   full_release()
+
+  //   val stopper = uuid flatMap { userRegistry.getById(_) }
+  //   val stopped = stopper flatMap { _.peer flatMap { userRegistry.getByName(_) } }
+  //   stopper foreach { u => userRegistry.register(u.copy(peer = None)) }
+  //   stopped foreach { u =>
+  //     pipes.delete(u.id)
+  //     sendTo(u.ws, Some(Json.obj("id" -> "stopCommunication")))
+  //   }
+  //   None
+  // }
 
   def handleOnlyId(id: String): Option[JsValue] = id match {
     case "stop" => stop()
