@@ -8,13 +8,14 @@ import scala.async.Async.{ async, await }
 import scala.language.postfixOps
 import play.api.Play.current
 import play.api.libs.concurrent.Akka
-import play.api.libs.json.{ JsError, JsSuccess, JsValue, Json }
+import play.api.libs.json._
 import play.api.Logger
 import kurento.actors._
 import kurento.helpers._
-import org.kurento.client.{ EndOfStreamEvent, EventListener, MediaPipeline, PlayerEndpoint, WebRtcEndpoint }
+import org.kurento.client.{ EndOfStreamEvent, EventListener, IceCandidate, IceCandidateFoundEvent, MediaPipeline, PlayerEndpoint, WebRtcEndpoint }
 import handlers.commonCases._
 import jsonEncoders.One2OneJson._
+
 
 class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
   var uuid: Option[String] = None
@@ -34,15 +35,50 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
 
   def asyncAcceptCall(callee: UserSession, caller: UserSession, calleeSdp: String) = async {
     val pipeline = await { AsyncCallMediaPipeline._create(kurentoActor) }
+    callee.setWebRtcEndpoint(pipeline.calleeWebRtcEndpoint)
+    caller.setWebRtcEndpoint(pipeline.callerWebRtcEndpoint)
+
     mut_pipe = Some(pipeline)
-    val calleeAnswer = await { pipeline.generateSdpAnswerForCallee(calleeSdp) }.get
-    val callerAnswer = await { pipeline.generateSdpAnswerForCaller(caller.sdpOffer.get) }.get
 
     pipes.add(callee.id -> pipeline)
     pipes.add(caller.id -> pipeline)
 
-    sendTo(caller.ws, Some(Json.obj("id" -> "startCommunication", "response" -> "accepted", "sdpAnswer" -> callerAnswer)))
-    sendSender(Some(Json.obj("id" -> "startCommunication", "sdpAnswer" -> calleeAnswer)))
+    // Add ICE listeners
+    pipeline.calleeWebRtcEndpoint.addIceCandidateFoundListener(new EventListener[IceCandidateFoundEvent] {
+        def onEvent(event: IceCandidateFoundEvent) {
+            val candidate = event.getCandidate()
+            val data = Json.stringify(Json.obj(
+                "candidate" -> candidate.getCandidate(),
+                "sdpMid" -> candidate.getSdpMid(),
+                "sdpMLineIndex" -> candidate.getSdpMLineIndex()
+            ))
+
+            sendTo(callee.ws, Some(Json.obj("id" -> "iceCandidate", "sdpAnswer" -> data)))
+        }
+    })
+
+    pipeline.callerWebRtcEndpoint.addIceCandidateFoundListener(new EventListener[IceCandidateFoundEvent] {
+        def onEvent(event: IceCandidateFoundEvent) {
+            val candidate = event.getCandidate()
+            val data = Json.stringify(Json.obj(
+                "candidate" -> candidate.getCandidate(),
+                "sdpMid" -> candidate.getSdpMid(),
+                "sdpMLineIndex" -> candidate.getSdpMLineIndex()
+            ))
+
+            sendTo(caller.ws, Some(Json.obj("id" -> "iceCandidate", "sdpAnswer" -> data)))
+        }
+    })
+
+    // Answer the caller
+    val calleeAnswer = await { pipeline.generateSdpAnswerForCallee(calleeSdp) }.get
+    sendTo(callee.ws, Some(Json.obj("id" -> "startCommunication", "response" -> "accepted", "sdpAnswer" -> calleeAnswer)))
+    pipeline.calleeWebRtcEndpoint.gatherCandidates()
+
+    // Notify callee
+    val callerAnswer = await { pipeline.generateSdpAnswerForCaller(caller.sdpOffer.get) }.get
+    sendTo(caller.ws, Some(Json.obj("id" -> "startCommunication", "sdpAnswer" -> callerAnswer)))
+    pipeline.callerWebRtcEndpoint.gatherCandidates()
   }
 
   def rejectCall(name: String, msg: String = "user declined", msg2: String = "") = {
@@ -174,6 +210,23 @@ class One2OneActor(out: ActorRef, kurento: KurentoHelp) extends Actor {
       logger.info(s"CallResponse: Reject call from: $from")
       rejectCall(from)
       None
+    }
+    case One2OneInJson("onIceCandidate", None, None, None, Some(sdpOffer), None, None) => uuid match {
+      case Some(u) => {
+          logger.info(s"ICECandidate")
+          val json = Json.parse(sdpOffer)
+          val ice = new IceCandidate(
+              (json \ "candidate").as[String],
+              (json \ "sdpMid").as[String],
+              (json \ "sdpMLineIndex").as[Int]
+          )
+          userRegistry.getById(u).get.addCandidate(ice)
+          None
+      }
+      case None => {
+          logger.error(s"User not registered")
+          None
+      }
     }
     case One2OneInJson("changeName", Some(name), None, None, None, None, None) => uuid match {
       case Some(u) => Some(register(u, name))  // Maybe stop the call if exist?

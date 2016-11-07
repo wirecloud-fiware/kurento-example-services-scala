@@ -1,6 +1,7 @@
 package handlers
 
 import org.kurento.client.KurentoClient
+import org.kurento.client.IceCandidate
 import scala.collection.mutable.HashMap
 import akka.actor.{ ActorRef }
 import akka.pattern.ask
@@ -59,7 +60,22 @@ object commonCases {
     peer: Option[String],
     sdpOffer: Option[String],
     actor: ActorRef
-  )
+  ) {
+
+    private val candidates = scala.collection.mutable.ArrayBuffer.empty[IceCandidate]
+
+    def addCandidate(candidate: IceCandidate) {
+        candidates += candidate
+    }
+
+    def setWebRtcEndpoint(webRtcEndpoint: WebRtcEndpoint) {
+        for (candidate <- candidates) {
+            webRtcEndpoint.addIceCandidate(candidate)
+        }
+        candidates.clear()
+    }
+
+  }
 
   case class AsyncCallMediaPipeline(
     val pipeline: MediaPipeline,
